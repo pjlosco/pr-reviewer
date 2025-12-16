@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "MIT"}
 authors = [
-    {name = "pjlosco", email = ""}
+    {name = "pjlosco", email = "pjlosco@users.noreply.github.com"}
 ]
 keywords = ["code-review", "ai", "langchain", "langgraph", "mcp"]
 classifiers = [
