@@ -23,6 +23,7 @@ from langchain_core.language_models import BaseChatModel
 from mcp_servers.github_server import (
     _get_pr_details_impl,
     _post_review_comments_impl,
+    _submit_review_impl,
 )
 from mcp_servers.jira_server import (
     _get_acceptance_criteria_impl,
@@ -56,6 +57,8 @@ class AgentState(TypedDict):
     confluence_context: Optional[dict]  # Domain context from Confluence
     review_analysis: Optional[str]  # Analysis results from LLM
     review_comments: Optional[list]  # Generated review comments
+    review_decision: Optional[str]   # Review decision: APPROVE, REQUEST_CHANGES, or COMMENT
+    review_body: Optional[str]       # Review body text for official review
     error: Optional[str]            # Error message if any
     status: str                    # Current status
 
@@ -640,6 +643,8 @@ Files Changed:
 Generate review comments in the following JSON format:
 {{
   "summary": "Overall review summary",
+  "review_decision": "APPROVE" | "REQUEST_CHANGES" | "COMMENT",
+  "review_body": "Detailed review summary to include in the official review",
   "comments": [
     {{
       "path": "file/path.py",
@@ -648,6 +653,11 @@ Generate review comments in the following JSON format:
     }}
   ]
 }}
+
+Review decision guidelines:
+- "APPROVE": Code is good quality, meets requirements, no critical issues
+- "REQUEST_CHANGES": Critical issues found that must be fixed (bugs, security, major design flaws)
+- "COMMENT": Minor issues or suggestions, but code is acceptable
 
 For each comment:
 - Use the file path from the files changed list
@@ -675,6 +685,8 @@ Return ONLY valid JSON, no markdown formatting."""
         try:
             review_data = json.loads(response_text)
             comments = review_data.get("comments", [])
+            review_decision = review_data.get("review_decision", "COMMENT")
+            review_body = review_data.get("review_body", review_data.get("summary", ""))
             
             # Format comments for GitHub API
             formatted_comments = []
@@ -688,6 +700,8 @@ Return ONLY valid JSON, no markdown formatting."""
             return {
                 **state,
                 "review_comments": formatted_comments,
+                "review_decision": review_decision,
+                "review_body": review_body,
                 "status": "review_generated"
             }
         except json.JSONDecodeError as e:
@@ -711,45 +725,81 @@ Return ONLY valid JSON, no markdown formatting."""
 
 def post_review_node(state: AgentState) -> AgentState:
     """
-    Post review comments to the GitHub PR.
+    Post review comments and submit official review to the GitHub PR.
     
-    This node posts the generated review comments to the GitHub PR
-    using the GitHub MCP server or direct API calls.
+    This node posts the generated review comments and submits an official
+    review (APPROVE, REQUEST_CHANGES, or COMMENT) to the GitHub PR.
     
     Args:
-        state: Current agent state with review comments
+        state: Current agent state with review comments and decision
         
     Returns:
         Updated state with posting status
     """
     pr_url = state.get("pr_url", "")
     review_comments = state.get("review_comments", [])
-    
-    if not review_comments:
-        logger.warning("No review comments to post")
-        return {
-            **state,
-            "status": "complete"
-        }
+    review_decision = state.get("review_decision", "COMMENT")
+    review_body = state.get("review_body", "")
     
     try:
-        logger.info(f"Posting {len(review_comments)} review comments to PR: {pr_url}")
-        result = _post_review_comments_impl(pr_url, review_comments)
+        # Submit official review with comments
+        logger.info(f"Submitting {review_decision} review to PR: {pr_url}")
         
-        posted = result.get("posted", 0)
-        failed = result.get("failed", 0)
+        # Validate review decision
+        if review_decision not in ["APPROVE", "REQUEST_CHANGES", "COMMENT"]:
+            logger.warning(f"Invalid review decision '{review_decision}', defaulting to COMMENT")
+            review_decision = "COMMENT"
         
-        logger.info(f"Posted {posted} comments, {failed} failed")
+        # Format comments for submit_review (needs path, line, body)
+        formatted_comments = []
+        for comment in review_comments:
+            if comment.get("path") and comment.get("line"):
+                formatted_comments.append({
+                    "path": comment.get("path"),
+                    "line": comment.get("line"),
+                    "body": comment.get("body", "")
+                })
+        
+        # Submit the review
+        review_result = _submit_review_impl(
+            pr_url=pr_url,
+            event=review_decision,
+            body=review_body or f"Code review completed. {len(review_comments)} comment(s).",
+            comments=formatted_comments if formatted_comments else None
+        )
+        
+        logger.info(f"Review submitted: {review_result.get('state', 'unknown')}")
+        
+        # If there are comments without line numbers, post them separately
+        general_comments = [
+            c for c in review_comments 
+            if not (c.get("path") and c.get("line"))
+        ]
+        
+        if general_comments:
+            logger.info(f"Posting {len(general_comments)} general comments separately")
+            try:
+                _post_review_comments_impl(pr_url, general_comments)
+            except Exception as e:
+                logger.warning(f"Failed to post some general comments: {e}")
         
         return {
             **state,
             "status": "complete"
         }
     except Exception as e:
-        logger.error(f"Failed to post review comments: {e}")
+        logger.error(f"Failed to submit review: {e}")
+        # Fallback: try to post comments without official review
+        if review_comments:
+            try:
+                logger.info("Falling back to posting comments without official review")
+                _post_review_comments_impl(pr_url, review_comments)
+            except Exception as fallback_error:
+                logger.error(f"Failed to post comments as fallback: {fallback_error}")
+        
         return {
             **state,
-            "error": f"Failed to post review comments: {str(e)}",
+            "error": f"Failed to submit review: {str(e)}",
             "status": "error"
         }
 
