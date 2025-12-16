@@ -29,7 +29,7 @@ jobs:
         with:
           python-version: '3.11'
       - run: pip install git+https://github.com/pjlosco/pr-reviewer.git
-      - run: python app.py --pr-url "${{ github.event.pull_request.html_url }}"
+      - run: pr-review-agent --pr-url "${{ github.event.pull_request.html_url }}"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           LLM_PROVIDER: "openai"

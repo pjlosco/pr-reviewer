@@ -51,8 +51,10 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           # Only ingest if cache was not restored (first run or cache miss)
+          # Note: Ingestion script is not included in the pip package, so we clone the repo
           if [ ! -d ~/.chromadb/confluence ]; then
-            python -m scripts.ingest_confluence --from-stubs
+            git clone --depth 1 https://github.com/pjlosco/pr-reviewer.git /tmp/pr-reviewer
+            python /tmp/pr-reviewer/scripts/ingest_confluence.py --from-stubs
           fi
       
       - name: Run code review
@@ -61,7 +63,7 @@ jobs:
           CHROMADB_PATH: ~/.chromadb/confluence
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
-          python app.py --pr-url "${{ github.event.pull_request.html_url }}"
+          pr-review-agent --pr-url "${{ github.event.pull_request.html_url }}"
 ```
 
 **Pros:**
@@ -86,7 +88,7 @@ Use a persistent ChromaDB server that survives between runs:
     CHROMADB_PORT: ${{ secrets.CHROMADB_PORT }}
     OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
   run: |
-    python app.py --pr-url "${{ github.event.pull_request.html_url }}"
+    pr-review-agent --pr-url "${{ github.event.pull_request.html_url }}"
 ```
 
 **Setup:**
@@ -183,7 +185,9 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           # Ingest specific pages or spaces
-          python scripts/ingest_confluence.py --page-ids 123456 789012
+          # Note: Clone repo first since scripts aren't in the pip package
+          git clone --depth 1 https://github.com/pjlosco/pr-reviewer.git /tmp/pr-reviewer
+          python /tmp/pr-reviewer/scripts/ingest_confluence.py --page-ids 123456 789012
 ```
 
 This way, ingestion happens once (or periodically), and the agent just searches the persistent database.

@@ -760,15 +760,30 @@ def post_review_node(state: AgentState) -> AgentState:
                     "body": comment.get("body", "")
                 })
         
-        # Submit the review
-        review_result = _submit_review_impl(
-            pr_url=pr_url,
-            event=review_decision,
-            body=review_body or f"Code review completed. {len(review_comments)} comment(s).",
-            comments=formatted_comments if formatted_comments else None
-        )
-        
-        logger.info(f"Review submitted: {review_result.get('state', 'unknown')}")
+        # Submit the review (will handle GitHub Actions APPROVE limitation)
+        try:
+            review_result = _submit_review_impl(
+                pr_url=pr_url,
+                event=review_decision,
+                body=review_body or f"Code review completed. {len(review_comments)} comment(s).",
+                comments=formatted_comments if formatted_comments else None
+            )
+            
+            logger.info(f"Review submitted: {review_result.get('state', 'unknown')}")
+        except Exception as review_error:
+            # If review submission fails (e.g., GitHub Actions approval), try to post comments
+            error_msg = str(review_error)
+            if "not permitted to approve" in error_msg.lower() or "422" in error_msg:
+                logger.warning("Cannot submit official review (likely GitHub Actions limitation), posting comments instead")
+                if review_comments:
+                    _post_review_comments_impl(pr_url, review_comments)
+                # Don't fail the workflow, just log the issue
+                return {
+                    **state,
+                    "status": "complete"
+                }
+            else:
+                raise
         
         # If there are comments without line numbers, post them separately
         general_comments = [
@@ -794,6 +809,11 @@ def post_review_node(state: AgentState) -> AgentState:
             try:
                 logger.info("Falling back to posting comments without official review")
                 _post_review_comments_impl(pr_url, review_comments)
+                # Don't fail if we can at least post comments
+                return {
+                    **state,
+                    "status": "complete"
+                }
             except Exception as fallback_error:
                 logger.error(f"Failed to post comments as fallback: {fallback_error}")
         

@@ -28,8 +28,8 @@ This guide explains how to use the `pr-review-agent` package in a separate demo 
          - uses: actions/setup-python@v5
            with:
              python-version: '3.11'
-         - run: pip install git+https://github.com/pjlosco/pr-reviewer.git
-         - run: python app.py --pr-url "${{ github.event.pull_request.html_url }}"
+        - run: pip install git+https://github.com/pjlosco/pr-reviewer.git
+        - run: pr-review-agent --pr-url "${{ github.event.pull_request.html_url }}"
            env:
              GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
              LLM_PROVIDER: "openai"
@@ -103,7 +103,9 @@ ChromaDB enables automatic discovery of relevant Confluence documentation when p
     OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
   run: |
     if [ ! -d ~/.chromadb/confluence ]; then
-      python -m scripts.ingest_confluence --from-stubs
+      # Note: Ingestion script is not included in pip package, so clone repo temporarily
+      git clone --depth 1 https://github.com/pjlosco/pr-reviewer.git /tmp/pr-reviewer
+      python /tmp/pr-reviewer/scripts/ingest_confluence.py --from-stubs
     fi
 
 - name: Run Review

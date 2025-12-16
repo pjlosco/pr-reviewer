@@ -9,6 +9,7 @@ This is a REAL implementation that connects to the actual GitHub API.
 
 import os
 import time
+import logging
 from typing import Optional
 from github import Github
 from github.GithubException import (
@@ -18,6 +19,9 @@ from github.GithubException import (
     BadCredentialsException,
 )
 from fastmcp import FastMCP
+
+# Configure logging
+logger = logging.getLogger(__name__)
 
 # Initialize FastMCP server
 mcp = FastMCP("GitHub MCP Server")
@@ -365,11 +369,12 @@ def _post_review_comment_impl(pr_url: str, comment: str, path: Optional[str] = N
         commit_sha = pr.head.sha
         
         # Create a review comment on a specific line
+        # PyGithub API: create_review_comment(body, commit, path, line)
         review_comment = pr.create_review_comment(
-            body=comment,
-            commit_id=commit_sha,
-            path=path,
-            line=line
+            comment,
+            commit_sha,
+            path,
+            line
         )
     elif path:
         # File-level comment - post as general comment with file reference
@@ -401,8 +406,11 @@ def _submit_review_impl(pr_url: str, event: str, body: str = "", comments: Optio
     This tool submits a formal review to a PR. Unlike individual comments,
     a review can approve the PR, request changes (block it), or just comment.
     
+    Note: GitHub Actions cannot approve PRs. If event is "APPROVE", it will
+    be automatically converted to "COMMENT" to avoid errors.
+    
     The agent can use this to:
-    - Approve PRs that meet all requirements
+    - Approve PRs that meet all requirements (converted to COMMENT in GitHub Actions)
     - Request changes for PRs with issues
     - Submit a review with multiple comments at once
     
@@ -431,6 +439,16 @@ def _submit_review_impl(pr_url: str, event: str, body: str = "", comments: Optio
     """
     if event not in ["APPROVE", "REQUEST_CHANGES", "COMMENT"]:
         raise ValueError(f"Invalid event: {event}. Must be APPROVE, REQUEST_CHANGES, or COMMENT")
+    
+    # GitHub Actions cannot approve PRs - convert APPROVE to COMMENT
+    # Check if we're running in GitHub Actions by checking for GITHUB_ACTIONS env var
+    if event == "APPROVE" and os.getenv("GITHUB_ACTIONS"):
+        logger.warning("GitHub Actions cannot approve PRs. Converting APPROVE to COMMENT.")
+        event = "COMMENT"
+        if body:
+            body = f"✅ Code looks good! (Note: GitHub Actions cannot approve PRs)\n\n{body}"
+        else:
+            body = "✅ Code looks good! (Note: GitHub Actions cannot approve PRs)"
     
     repo_path, pr_number = parse_pr_url(pr_url)
     client = get_github_client()
@@ -527,11 +545,12 @@ def _post_review_comments_impl(pr_url: str, comments: list[dict]) -> dict:
             if path and line:
                 # Line-specific comment
                 commit_sha = pr.head.sha
+                # PyGithub API: create_review_comment(body, commit, path, line)
                 review_comment = pr.create_review_comment(
-                    body=body,
-                    commit_id=commit_sha,
-                    path=path,
-                    line=line
+                    body,
+                    commit_sha,
+                    path,
+                    line
                 )
             elif path:
                 # File-level comment
