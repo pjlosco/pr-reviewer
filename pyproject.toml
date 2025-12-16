@@ -57,6 +57,9 @@ Issues = "https://github.com/pjlosco/pr-reviewer/issues"
 where = ["."]
 include = ["agent*", "mcp_servers*"]
 
+[tool.setuptools]
+py-modules = ["app"]
+
 [tool.black]
 line-length = 100
 target-version = ['py311']
