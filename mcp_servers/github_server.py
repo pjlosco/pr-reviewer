@@ -234,15 +234,7 @@ def _get_pr_details_impl(pr_url: str) -> dict:
     repo = client.get_repo(repo_path)
     pr = repo.get_pull(pr_number)
     
-    # Get author information
-    author = pr.user
-    author_info = {
-        "login": author.login,
-        "name": author.name or author.login,
-        "email": author.email or ""
-    }
-    
-    # Get file changes
+    # Get file changes (needed for both files list and diff construction)
     files = []
     for file in pr.get_files():
         files.append({
@@ -251,6 +243,14 @@ def _get_pr_details_impl(pr_url: str) -> dict:
             "deletions": file.deletions,
             "patch": file.patch or ""
         })
+    
+    # Get author information
+    author = pr.user
+    author_info = {
+        "login": author.login,
+        "name": author.name or author.login,
+        "email": author.email or ""
+    }
     
     # Get commit history
     commits = []
@@ -280,8 +280,18 @@ def _get_pr_details_impl(pr_url: str) -> dict:
         # If review requests can't be fetched, continue without reviewers
         pass
     
-    # Get PR diff
-    diff = pr.diff
+    # Construct unified diff from file patches
+    # PyGithub doesn't provide pr.diff directly, so we build it from file patches
+    diff_parts = []
+    for file_info in files:
+        if file_info["patch"]:
+            # Add file header for unified diff format
+            diff_parts.append(f"diff --git a/{file_info['path']} b/{file_info['path']}")
+            diff_parts.append(f"--- a/{file_info['path']}")
+            diff_parts.append(f"+++ b/{file_info['path']}")
+            diff_parts.append(file_info["patch"])
+    
+    diff = "\n".join(diff_parts) if diff_parts else ""
     
     return {
         "url": pr.html_url,
