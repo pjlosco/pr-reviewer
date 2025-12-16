@@ -1,0 +1,78 @@
+name: AI Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: read
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+      
+      - name: Run Code Review Agent
+        env:
+          # GitHub token (automatically provided by GitHub Actions)
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          
+          # LLM Configuration
+          LLM_PROVIDER: "openai"
+          LLM_MODEL: "gpt-3.5-turbo"
+          LLM_TEMPERATURE: "0.7"
+          
+          # LLM API Keys (add the one for your provider)
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          
+          # Jira Configuration
+          # Option A: Real API (set JIRA_URL, JIRA_EMAIL, JIRA_API_TOKEN)
+          # Option B: Stub Data (set JIRA_STUB_DATA_PATH or JIRA_STUB_DATA_URL)
+          # Option C: Default stubs (leave unset)
+          JIRA_URL: ${{ secrets.JIRA_URL }}
+          JIRA_EMAIL: ${{ secrets.JIRA_EMAIL }}
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+          JIRA_STUB_DATA_PATH: ${{ env.JIRA_STUB_DATA_PATH }}
+          JIRA_STUB_DATA_URL: ${{ env.JIRA_STUB_DATA_URL }}
+          
+          # Confluence Configuration
+          # Option A: Real API (set CONFLUENCE_URL, CONFLUENCE_EMAIL, CONFLUENCE_API_TOKEN)
+          # Option B: Stub Data (set CONFLUENCE_STUB_DATA_PATH or CONFLUENCE_STUB_DATA_URL)
+          # Option C: Default stubs (leave unset)
+          CONFLUENCE_URL: ${{ secrets.CONFLUENCE_URL }}
+          CONFLUENCE_EMAIL: ${{ secrets.CONFLUENCE_EMAIL }}
+          CONFLUENCE_API_TOKEN: ${{ secrets.CONFLUENCE_API_TOKEN }}
+          CONFLUENCE_STUB_DATA_PATH: ${{ env.CONFLUENCE_STUB_DATA_PATH }}
+          CONFLUENCE_STUB_DATA_URL: ${{ env.CONFLUENCE_STUB_DATA_URL }}
+          
+          # LangSmith Observability (Optional but Recommended)
+          LANGCHAIN_TRACING_V2: "true"
+          LANGCHAIN_API_KEY: ${{ secrets.LANGCHAIN_API_KEY }}
+          LANGCHAIN_PROJECT: "pr-review-agent"
+          
+          # PR URL from GitHub Actions context
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          python app.py --pr-url "$PR_URL"
+      
+      - name: Report status
+        if: failure()
+        run: |
+          echo "Code review agent failed. Check logs above for details."
+

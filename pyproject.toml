@@ -1,0 +1,105 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pr-review-agent"
+version = "0.1.0"
+description = "AI-powered code review agent using LangGraph and MCP servers"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [
+    {name = "pjlosco", email = ""}
+]
+keywords = ["code-review", "ai", "langchain", "langgraph", "mcp"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
+dependencies = [
+    "langchain>=0.1.0",
+    "langgraph>=0.0.40",
+    "langchain-openai>=0.0.5",
+    "langchain-community>=0.0.20",
+    "fastmcp>=0.9.0",
+    "pygithub>=2.1.0",
+    "python-dotenv>=1.0.0",
+    "jira>=3.5.0",
+]
+
+[project.scripts]
+pr-review-agent = "app:main"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "pytest-mock>=3.10.0",
+    "black>=23.0.0",
+    "ruff>=0.1.0",
+]
+chromadb = [
+    "chromadb>=0.4.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/pjlosco/pr-reviewer"
+Repository = "https://github.com/pjlosco/pr-reviewer"
+Issues = "https://github.com/pjlosco/pr-reviewer/issues"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["agent*", "mcp_servers*"]
+
+[tool.black]
+line-length = 100
+target-version = ['py311']
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "-v",
+    "--strict-markers",
+    "--tb=short",
+]
+markers = [
+    "unit: Unit tests",
+    "integration: Integration tests",
+    "e2e: End-to-end tests",
+]
+
+[tool.coverage.run]
+source = ["agent", "mcp_servers", "app"]
+omit = [
+    "*/tests/*",
+    "*/test_*.py",
+    # Exclude optional ChromaDB service from coverage goal (it's optional)
+    "mcp_servers/chromadb_service.py",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "class .*\\bProtocol\\):",
+    "@(abc\\.)?abstractmethod",
+]
+# Set minimum coverage threshold
+fail_under = 70

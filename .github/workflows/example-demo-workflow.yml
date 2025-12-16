@@ -1,0 +1,130 @@
+# Example GitHub Actions Workflow for Demo Projects
+# 
+# Copy this file to your demo project as: .github/workflows/code-review.yml
+# Then customize the repository URL in the pip install command
+#
+# LLM Configuration:
+#   - LLM_PROVIDER: "openai" (default), "anthropic", or "google"
+#   - LLM_MODEL: Model name (e.g., "gpt-3.5-turbo", "claude-3-haiku-20240307")
+#   - LLM_TEMPERATURE: 0.0-1.0 (default: 0.7)
+#   - LLM_API_KEY: API key for the selected provider
+#
+# Jira Configuration (choose one):
+#   Option A - Real API: Set JIRA_URL, JIRA_EMAIL, and JIRA_API_TOKEN
+#   Option B - Stub Data: Set JIRA_STUB_DATA_PATH or JIRA_STUB_DATA_URL
+#   Option C - Default Stubs: Leave unset to use built-in minimal stubs
+#
+# Confluence Configuration (choose one):
+#   Option A - Real API: Set CONFLUENCE_URL, CONFLUENCE_EMAIL, and CONFLUENCE_API_TOKEN
+#   Option B - Stub Data: Set CONFLUENCE_STUB_DATA_PATH or CONFLUENCE_STUB_DATA_URL
+#   Option C - Default Stubs: Leave unset to use built-in minimal stubs
+#
+# Required GitHub Secrets:
+#   - OPENAI_API_KEY: Your OpenAI API key (if using OpenAI)
+#   - ANTHROPIC_API_KEY: Your Anthropic API key (if using Anthropic)
+#   - GOOGLE_API_KEY: Your Google API key (if using Google)
+#   - Optional: LANGCHAIN_API_KEY (for LangSmith observability - recommended)
+#   - Optional: JIRA_URL, JIRA_EMAIL, JIRA_API_TOKEN (for real Jira API)
+#   - Optional: CONFLUENCE_URL, CONFLUENCE_EMAIL, CONFLUENCE_API_TOKEN (for real Confluence API)
+
+name: AI Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: read
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      
+      - name: Install PR Review Agent
+        run: |
+          # Replace 'pjlosco/pr-reviewer' with your actual repository
+          pip install git+https://github.com/pjlosco/pr-reviewer.git
+      
+      - name: Run Code Review Agent
+        env:
+          # GitHub token (automatically provided by GitHub Actions)
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          
+          # LLM Configuration - Customize these values
+          # Provider: "openai", "anthropic", or "google"
+          LLM_PROVIDER: "openai"
+          
+          # Model name - examples:
+          # OpenAI: "gpt-3.5-turbo", "gpt-4", "gpt-4-turbo-preview"
+          # Anthropic: "claude-3-haiku-20240307", "claude-3-sonnet-20240229", "claude-3-opus-20240229"
+          # Google: "gemini-pro", "gemini-pro-vision"
+          LLM_MODEL: "gpt-3.5-turbo"
+          
+          # Temperature: 0.0 (deterministic) to 1.0 (creative), default: 0.7
+          LLM_TEMPERATURE: "0.7"
+          
+          # LLM API Key - REQUIRED: Add the appropriate secret in your repo settings
+          # Go to: Settings → Secrets and variables → Actions → New repository secret
+          # Use OPENAI_API_KEY for OpenAI, ANTHROPIC_API_KEY for Anthropic, etc.
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          
+          # Jira Configuration
+          # Option A: Real API Connection (uncomment and set secrets)
+          # JIRA_URL: https://your-company.atlassian.net
+          # JIRA_EMAIL: ${{ secrets.JIRA_EMAIL }}
+          # JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+          
+          # Option B: Stub Data from File (recommended for demo projects)
+          # Create stubs/jira-stubs.json in your repo and reference it:
+          JIRA_STUB_DATA_PATH: ./stubs/jira-stubs.json
+          
+          # Option C: Stub Data from URL
+          # JIRA_STUB_DATA_URL: https://raw.githubusercontent.com/your-org/repo/main/stubs/jira-stubs.json
+          
+          # Confluence Configuration
+          # Option A: Real API Connection (uncomment and set secrets)
+          # CONFLUENCE_URL: https://your-company.atlassian.net
+          # CONFLUENCE_EMAIL: ${{ secrets.CONFLUENCE_EMAIL }}
+          # CONFLUENCE_API_TOKEN: ${{ secrets.CONFLUENCE_API_TOKEN }}
+          
+          # Option B: Stub Data from File (recommended for demo projects)
+          # Create stubs/confluence-stubs.json in your repo and reference it:
+          CONFLUENCE_STUB_DATA_PATH: ./stubs/confluence-stubs.json
+          
+          # Option C: Stub Data from URL
+          # CONFLUENCE_STUB_DATA_URL: https://raw.githubusercontent.com/your-org/repo/main/stubs/confluence-stubs.json
+          
+          # LangSmith Observability (Optional but Recommended)
+          # Enable LangSmith tracing for observability and debugging
+          # Get API key from: https://smith.langchain.com
+          LANGCHAIN_TRACING_V2: "true"
+          LANGCHAIN_API_KEY: ${{ secrets.LANGCHAIN_API_KEY }}
+          LANGCHAIN_PROJECT: "pr-review-agent"  # Optional: customize project name
+          
+          # PR URL from GitHub Actions context
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          python app.py --pr-url "$PR_URL"
+      
+      - name: Report status
+        if: failure()
+        run: |
+          echo "Code review agent failed. Check logs above for details."
+          echo "Common issues:"
+          echo "  - Missing OPENAI_API_KEY secret"
+          echo "  - Invalid GitHub token permissions"
+          echo "  - Network/API errors"
+

@@ -1,0 +1,20 @@
+# Core dependencies
+langchain>=0.1.0
+langgraph>=0.0.40
+langchain-openai>=0.0.5
+langchain-community>=0.0.20
+fastmcp>=0.9.0
+pygithub>=2.1.0
+python-dotenv>=1.0.0
+jira>=3.5.0
+
+# Optional: ChromaDB for semantic search (install if using semantic search feature)
+# chromadb>=0.4.0
+
+# Optional: for development
+# pytest>=7.0.0
+# pytest-cov>=4.0.0
+# pytest-mock>=3.10.0
+# black>=23.0.0
+# ruff>=0.1.0
+
