@@ -269,6 +269,7 @@ class TestSubmitReview:
         mock_review.html_url = "https://github.com/owner/repo/pull/123#review-1"
         
         mock_pr.create_review.return_value = mock_review
+        mock_pr.head.sha = "abc123"
         mock_client.get_repo.return_value = mock_repo
         mock_repo.get_pull.return_value = mock_pr
         mock_get_client.return_value = mock_client
@@ -281,6 +282,80 @@ class TestSubmitReview:
         
         assert result["state"] == "APPROVED"
         mock_pr.create_review.assert_called_once()
+    
+    @patch("mcp_servers.github_server.get_github_client")
+    @patch("mcp_servers.github_server.os.getenv")
+    def test_submit_review_converts_approve_to_comment_in_github_actions(self, mock_getenv, mock_get_client):
+        """Test that APPROVE is converted to COMMENT in GitHub Actions."""
+        from mcp_servers.github_server import _submit_review_impl as submit_review
+        
+        mock_getenv.return_value = "true"  # GITHUB_ACTIONS=true
+        
+        mock_client = MagicMock()
+        mock_repo = MagicMock()
+        mock_pr = MagicMock()
+        mock_review = MagicMock()
+        mock_review.id = 1
+        mock_review.state = "COMMENTED"
+        mock_review.body = "✅ Code looks good! (Note: GitHub Actions cannot approve PRs)\n\nLooks good!"
+        mock_review.submitted_at = None
+        mock_review.html_url = "https://github.com/owner/repo/pull/123#review-1"
+        
+        mock_pr.create_review.return_value = mock_review
+        mock_pr.head.sha = "abc123"
+        mock_client.get_repo.return_value = mock_repo
+        mock_repo.get_pull.return_value = mock_pr
+        mock_get_client.return_value = mock_client
+        
+        result = submit_review(
+            pr_url="https://github.com/owner/repo/pull/123",
+            event="APPROVE",
+            body="Looks good!"
+        )
+        
+        # Should have been converted to COMMENT
+        mock_pr.create_review.assert_called_once_with(
+            body="✅ Code looks good! (Note: GitHub Actions cannot approve PRs)\n\nLooks good!",
+            event="COMMENT",
+            comments=[]
+        )
+        assert result["state"] == "COMMENTED"
+    
+    @patch("mcp_servers.github_server.get_github_client")
+    def test_submit_review_with_comments(self, mock_get_client):
+        """Test that submit_review includes comments in review."""
+        from mcp_servers.github_server import _submit_review_impl as submit_review
+        
+        mock_client = MagicMock()
+        mock_repo = MagicMock()
+        mock_pr = MagicMock()
+        mock_review = MagicMock()
+        mock_review.id = 1
+        mock_review.state = "COMMENTED"
+        mock_review.body = "Review"
+        mock_review.submitted_at = None
+        mock_review.html_url = "https://github.com/owner/repo/pull/123#review-1"
+        
+        mock_pr.create_review.return_value = mock_review
+        mock_pr.head.sha = "abc123"
+        mock_client.get_repo.return_value = mock_repo
+        mock_repo.get_pull.return_value = mock_pr
+        mock_get_client.return_value = mock_client
+        
+        comments = [
+            {"path": "test.py", "line": 10, "body": "Fix this"}
+        ]
+        
+        result = submit_review(
+            pr_url="https://github.com/owner/repo/pull/123",
+            event="COMMENT",
+            body="Review",
+            comments=comments
+        )
+        
+        # Verify comments were formatted correctly
+        call_args = mock_pr.create_review.call_args
+        assert call_args[1]["comments"] == [{"path": "test.py", "line": 10, "body": "Fix this"}]
     
     @patch("mcp_servers.github_server.get_github_client")
     def test_submit_review_invalid_event(self, mock_get_client):

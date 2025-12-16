@@ -408,6 +408,93 @@ class TestPostReviewNode:
     """Tests for post_review_node()"""
     
     @patch("agent.review_agent._post_review_comments_impl")
+    @patch("agent.review_agent.os.getenv")
+    def test_post_review_posts_comments_in_github_actions(self, mock_getenv, mock_post_comments, sample_pr_url):
+        """
+        Test that post_review_node posts comments as comment in GitHub Actions.
+        
+        Expected behavior:
+        - Detects GitHub Actions environment
+        - Posts summary comment with review decision
+        - Posts all review comments
+        - Updates status to complete
+        """
+        mock_getenv.return_value = "true"  # GITHUB_ACTIONS=true
+        mock_post_comments.return_value = {"posted": 3, "failed": 0}
+        
+        review_comments = [
+            {"path": "test.py", "line": 10, "body": "Fix this"}
+        ]
+        
+        state = {
+            "pr_url": sample_pr_url,
+            "review_comments": review_comments,
+            "review_decision": "APPROVE",
+            "review_body": "Looks good!",
+            "status": "generated"
+        }
+        
+        result = post_review_node(state)
+        
+        assert result["status"] == "complete"
+        # Should be called twice: once for summary, once for comments
+        assert mock_post_comments.call_count == 2
+    
+    @patch("agent.review_agent._post_review_comments_impl")
+    @patch("agent.review_agent.os.getenv")
+    def test_post_review_handles_request_changes_in_github_actions(self, mock_getenv, mock_post_comments, sample_pr_url):
+        """Test that REQUEST_CHANGES decision is posted correctly in GitHub Actions."""
+        mock_getenv.return_value = "true"
+        mock_post_comments.return_value = {"posted": 1, "failed": 0}
+        
+        state = {
+            "pr_url": sample_pr_url,
+            "review_comments": [{"body": "Fix this"}],
+            "review_decision": "REQUEST_CHANGES",
+            "review_body": "Needs changes",
+            "status": "generated"
+        }
+        
+        result = post_review_node(state)
+        assert result["status"] == "complete"
+    
+    @patch("agent.review_agent._submit_review_impl")
+    @patch("agent.review_agent._post_review_comments_impl")
+    @patch("agent.review_agent.os.getenv")
+    def test_post_review_submits_official_review_when_not_github_actions(self, mock_getenv, mock_post_comments, mock_submit_review, sample_pr_url):
+        """
+        Test that post_review_node submits official review when not in GitHub Actions.
+        
+        Expected behavior:
+        - Detects non-GitHub Actions environment
+        - Submits official review via _submit_review_impl
+        - Posts general comments separately if needed
+        """
+        mock_getenv.return_value = None  # Not in GitHub Actions
+        mock_submit_review.return_value = {"id": 1, "state": "APPROVED", "body": "", "submitted_at": "", "url": ""}
+        mock_post_comments.return_value = {"posted": 1, "failed": 0}
+        
+        review_comments = [
+            {"path": "test.py", "line": 10, "body": "Fix this"},
+            {"body": "General comment"}  # No path/line
+        ]
+        
+        state = {
+            "pr_url": sample_pr_url,
+            "review_comments": review_comments,
+            "review_decision": "APPROVE",
+            "review_body": "Looks good!",
+            "status": "generated"
+        }
+        
+        result = post_review_node(state)
+        
+        assert result["status"] == "complete"
+        mock_submit_review.assert_called_once()
+        # Should post general comments separately
+        mock_post_comments.assert_called_once()
+    
+    @patch("agent.review_agent._post_review_comments_impl")
     def test_post_review_posts_comments(self, mock_post_comments, sample_pr_url):
         """
         Test that post_review_node posts comments to GitHub.
@@ -433,6 +520,21 @@ class TestPostReviewNode:
         
         assert result["status"] == "complete"
         mock_post_comments.assert_called_once_with(sample_pr_url, review_comments)
+    
+    @patch("agent.review_agent._post_review_comments_impl")
+    def test_post_review_handles_invalid_decision(self, mock_post_comments, sample_pr_url):
+        """Test that invalid review decision defaults to COMMENT."""
+        mock_post_comments.return_value = {"posted": 1, "failed": 0}
+        
+        state = {
+            "pr_url": sample_pr_url,
+            "review_comments": [{"body": "Test"}],
+            "review_decision": "INVALID",
+            "status": "generated"
+        }
+        
+        result = post_review_node(state)
+        assert result["status"] == "complete"
 
 
 class TestRoutingFunctions:
