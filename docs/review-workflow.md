@@ -125,14 +125,156 @@ The agent can:
 
 These are not core review actions and can be added later if needed.
 
+## What Review Comments Look Like
+
+### End-to-End Flow
+
+The agent follows this flow to post review comments:
+
+1. **Analyze Code** → LLM analyzes PR changes against acceptance criteria and domain context
+2. **Generate Comments** → LLM generates structured review comments with file paths and line numbers
+3. **Post Comments** → Comments are posted to GitHub PR via GitHub MCP server
+
+### Comment Types
+
+#### 1. Summary Comment (GitHub Actions)
+
+In GitHub Actions, the agent posts a summary comment with the review decision:
+
+```markdown
+**Review Decision: APPROVE** ✅
+
+Code review completed. The implementation meets all acceptance 
+criteria from DEMO-101. The OAuth2 authentication flow is correctly 
+implemented with proper session management.
+
+---
+*Note: GitHub Actions cannot submit official reviews, so this is posted as a comment.*
+```
+
+#### 2. Line-Specific Comments
+
+Comments on specific lines appear in the "Files changed" tab:
+
+**Example:**
+- **File**: `src/api.py`
+- **Line**: 45
+- **Comment**: 
+  ```
+  Consider returning proper HTTP status codes. According to the 
+  API Design Guidelines, authentication errors should return 
+  401 Unauthorized, not just an error message in the response body.
+  ```
+
+#### 3. File-Level Comments
+
+General comments about a file:
+
+**Example:**
+- **File**: `src/auth.py`
+- **Comment**:
+  ```
+  **File: src/auth.py**
+  
+  Overall structure looks good. Consider adding more comprehensive 
+  error handling for edge cases like network timeouts during OAuth 
+  token exchange.
+  ```
+
+### Review Decision Format
+
+The agent determines one of three review decisions:
+
+#### APPROVE ✅
+```markdown
+**Review Decision: APPROVE** ✅
+
+Code review completed. All acceptance criteria met, no critical 
+issues found. Ready to merge.
+```
+
+#### REQUEST CHANGES ❌
+```markdown
+**Review Decision: REQUEST CHANGES** ❌
+
+Code review completed with 3 comment(s). Critical issues found 
+that must be addressed:
+- Missing error handling
+- Security concern with token storage
+- Performance issue in algorithm
+
+Please address these issues before merging.
+```
+
+#### COMMENT 💬
+```markdown
+**Review Decision: COMMENT** 💬
+
+Code review completed with 2 comment(s). Code is acceptable but 
+has some suggestions for improvement.
+```
+
+### Complete Example
+
+Here's what a full review looks like on a PR:
+
+**Conversation Tab:**
+```
+[AI Code Review Bot] - 2 minutes ago
+**Review Decision: REQUEST CHANGES** ❌
+
+Code review completed with 4 comment(s).
+
+Issues found:
+- Missing HTTP status codes in API responses
+- Performance concern with O(n*k) algorithm
+- Missing error handling for edge cases
+
+Please address the critical issues before merging.
+
+---
+*Note: GitHub Actions cannot submit official reviews, so this is posted as a comment.*
+```
+
+**Files Changed Tab:**
+```
+src/api.py
+  Line 45: Consider returning proper HTTP status codes...
+  Line 67: Return 404 when session not found...
+
+src/leetcode_sliding_window.py
+  Line 15: Use sliding window technique for O(n) complexity...
+
+src/auth.py
+  Line 52: Add timeout handling for OAuth token exchange...
+```
+
+### GitHub Actions Limitation
+
+**Important**: GitHub Actions cannot submit official reviews (approve/request changes). The agent automatically:
+
+1. Detects GitHub Actions environment
+2. Posts review decision as a comment instead
+3. Posts all line-specific and file-level comments normally
+4. Includes a note explaining the limitation
+
+This provides the same feedback without hitting GitHub's restrictions.
+
+### Outside GitHub Actions
+
+When running in other environments (local, Jenkins, etc.), the agent can:
+- Submit official reviews with approve/request changes
+- Post line-specific comments as part of the review
+- Block PRs from merging if REQUEST_CHANGES is used
+
 ## Conclusion
 
 ✅ **We have full support for all core review actions:**
 - Reading PRs
-- Commenting on code
-- Approving PRs
+- Commenting on code (line-specific, file-level, general)
+- Posting review decisions (as comments in GitHub Actions, official reviews elsewhere)
 - Requesting changes
-- Submitting formal reviews
+- Providing context-aware feedback
 
-The implementation is complete for the review workflow. No additional actions needed for basic review functionality.
+The implementation is complete and fully wired end-to-end. All review comments are posted via the GitHub MCP server and appear directly on the PR.
 

@@ -55,6 +55,121 @@ This guide explains how to use the `pr-review-agent` package in a separate demo 
 
 5. **Test**: Create a PR and the agent will automatically review it.
 
+## What to Expect
+
+When the agent runs, it will post review comments on your PR. Here's what you'll see:
+
+### In GitHub Actions (Most Common)
+
+Since GitHub Actions cannot submit official reviews, the agent posts comments instead:
+
+#### 1. Review Summary Comment
+
+The agent posts a summary comment at the top of the PR conversation with the review decision:
+
+```
+**Review Decision: APPROVE** ✅
+
+Code review completed. The implementation looks good overall. 
+All acceptance criteria from DEMO-101 are met. The OAuth2 
+authentication flow is correctly implemented with proper 
+error handling.
+
+---
+*Note: GitHub Actions cannot submit official reviews, so this is posted as a comment.*
+```
+
+Or for issues found:
+
+```
+**Review Decision: REQUEST CHANGES** ❌
+
+Code review completed with 3 comment(s). Several issues 
+need to be addressed before this can be merged.
+
+Issues found:
+- Missing error handling in authentication flow
+- API endpoints don't return proper HTTP status codes
+- Performance concern with O(n*k) algorithm
+
+---
+*Note: GitHub Actions cannot submit official reviews, so this is posted as a comment.*
+```
+
+#### 2. Line-Specific Comments
+
+The agent posts comments directly on specific lines of code:
+
+**Example on `src/api.py` line 45:**
+```
+Consider adding proper HTTP status codes. According to the 
+API Design Guidelines, authentication errors should return 
+401 Unauthorized, not just an error message in the response body.
+```
+
+**Example on `src/leetcode_sliding_window.py` line 15:**
+```
+This algorithm has O(n*k) time complexity. Consider using 
+the sliding window technique for O(n) complexity. See the 
+optimized version in the same file for reference.
+```
+
+#### 3. File-Level Comments
+
+For general file-level feedback:
+
+```
+**File: src/auth.py**
+
+Overall structure looks good. Consider adding more 
+comprehensive error handling for edge cases like network 
+timeouts during OAuth token exchange.
+```
+
+### Outside GitHub Actions
+
+When running outside GitHub Actions (e.g., locally or in other CI systems), the agent can submit official reviews:
+
+- **APPROVE**: Shows as an approved review with green checkmark
+- **REQUEST_CHANGES**: Shows as a "changes requested" review that blocks merging
+- **COMMENT**: Shows as a review comment without approval/block
+
+### Review Comment Format
+
+All comments include:
+- **Constructive feedback**: Actionable suggestions, not just criticism
+- **Context-aware**: References Jira acceptance criteria and Confluence guidelines when available
+- **Line-specific**: Points to exact lines when possible
+- **Prioritized**: Most critical issues first
+
+### Example Full Review
+
+Here's what a complete review might look like:
+
+**Summary Comment:**
+```
+**Review Decision: REQUEST CHANGES** ❌
+
+Code review completed with 4 comment(s).
+
+Overall Assessment:
+- ✅ OAuth2 flow is correctly implemented
+- ❌ Missing proper HTTP status codes in API responses
+- ⚠️ Performance issue in sliding window algorithm
+- 💡 Consider adding rate limiting per acceptance criteria
+
+Please address the critical issues before merging.
+
+---
+*Note: GitHub Actions cannot submit official reviews, so this is posted as a comment.*
+```
+
+**Line Comments:**
+1. `src/api.py:45` - "Return 401 status code for authentication errors"
+2. `src/api.py:67` - "Return 404 status code when session not found"
+3. `src/leetcode_sliding_window.py:15` - "Use sliding window for O(n) complexity"
+4. `src/auth.py:52` - "Add timeout handling for OAuth token exchange"
+
 ## Configuration
 
 ### LLM Configuration

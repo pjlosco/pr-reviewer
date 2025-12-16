@@ -73,6 +73,32 @@ run_review_agent(pr_url="https://github.com/owner/repo/pull/123")
 
 See [Setting Up a Demo Project](docs/setup-demo-project.md) for complete instructions.
 
+**What to Expect:**
+
+When the agent runs, it will post review comments on your PR:
+
+1. **Summary Comment**: A comment with the review decision (APPROVE ✅, REQUEST CHANGES ❌, or COMMENT 💬)
+2. **Line-Specific Comments**: Comments on specific lines of code in the "Files changed" tab
+3. **File-Level Comments**: General feedback about specific files
+
+**Example Review Comment:**
+```
+**Review Decision: REQUEST CHANGES** ❌
+
+Code review completed with 3 comment(s).
+
+Issues found:
+- Missing HTTP status codes in API responses
+- Performance concern with O(n*k) algorithm
+
+Please address these issues before merging.
+
+---
+*Note: GitHub Actions cannot submit official reviews, so this is posted as a comment.*
+```
+
+See [Review Workflow Documentation](docs/review-workflow.md) for detailed examples of what review comments look like.
+
 Quick example workflow (`.github/workflows/code-review.yml`):
 
 ```yaml
