@@ -742,26 +742,69 @@ def post_review_node(state: AgentState) -> AgentState:
     review_body = state.get("review_body", "")
     
     try:
-        # Submit official review with comments
-        logger.info(f"Submitting {review_decision} review to PR: {pr_url}")
+        # Check if we're in GitHub Actions
+        is_github_actions = os.getenv("GITHUB_ACTIONS") == "true"
         
         # Validate review decision
         if review_decision not in ["APPROVE", "REQUEST_CHANGES", "COMMENT"]:
             logger.warning(f"Invalid review decision '{review_decision}', defaulting to COMMENT")
             review_decision = "COMMENT"
         
-        # Format comments for submit_review (needs path, line, body)
-        formatted_comments = []
-        for comment in review_comments:
-            if comment.get("path") and comment.get("line"):
-                formatted_comments.append({
-                    "path": comment.get("path"),
-                    "line": comment.get("line"),
-                    "body": comment.get("body", "")
-                })
-        
-        # Submit the review (will handle GitHub Actions APPROVE limitation)
-        try:
+        if is_github_actions:
+            # In GitHub Actions, we can't submit official reviews, so post a comment with the decision
+            logger.info(f"GitHub Actions detected - posting review decision as comment: {review_decision}")
+            
+            # Create a review summary comment with the decision
+            decision_emoji = {
+                "APPROVE": "✅",
+                "REQUEST_CHANGES": "❌",
+                "COMMENT": "💬"
+            }.get(review_decision, "💬")
+            
+            decision_text = {
+                "APPROVE": "**Review Decision: APPROVE** ✅",
+                "REQUEST_CHANGES": "**Review Decision: REQUEST CHANGES** ❌",
+                "COMMENT": "**Review Decision: COMMENT** 💬"
+            }.get(review_decision, "**Review Decision: COMMENT** 💬")
+            
+            summary_comment_body = f"""{decision_text}
+
+{review_body or f"Code review completed with {len(review_comments)} comment(s)."}
+
+---
+*Note: GitHub Actions cannot submit official reviews, so this is posted as a comment.*"""
+            
+            # Post the summary comment first
+            summary_comment = [{"body": summary_comment_body}]
+            try:
+                _post_review_comments_impl(pr_url, summary_comment)
+            except Exception as e:
+                logger.warning(f"Failed to post summary comment: {e}")
+            
+            # Post all review comments
+            if review_comments:
+                logger.info(f"Posting {len(review_comments)} review comments")
+                _post_review_comments_impl(pr_url, review_comments)
+            
+            return {
+                **state,
+                "status": "complete"
+            }
+        else:
+            # Not in GitHub Actions - submit official review
+            logger.info(f"Submitting {review_decision} review to PR: {pr_url}")
+            
+            # Format comments for submit_review (needs path, line, body)
+            formatted_comments = []
+            for comment in review_comments:
+                if comment.get("path") and comment.get("line"):
+                    formatted_comments.append({
+                        "path": comment.get("path"),
+                        "line": comment.get("line"),
+                        "body": comment.get("body", "")
+                    })
+            
+            # Submit the review
             review_result = _submit_review_impl(
                 pr_url=pr_url,
                 event=review_decision,
@@ -770,38 +813,24 @@ def post_review_node(state: AgentState) -> AgentState:
             )
             
             logger.info(f"Review submitted: {review_result.get('state', 'unknown')}")
-        except Exception as review_error:
-            # If review submission fails (e.g., GitHub Actions approval), try to post comments
-            error_msg = str(review_error)
-            if "not permitted to approve" in error_msg.lower() or "422" in error_msg:
-                logger.warning("Cannot submit official review (likely GitHub Actions limitation), posting comments instead")
-                if review_comments:
-                    _post_review_comments_impl(pr_url, review_comments)
-                # Don't fail the workflow, just log the issue
-                return {
-                    **state,
-                    "status": "complete"
-                }
-            else:
-                raise
-        
-        # If there are comments without line numbers, post them separately
-        general_comments = [
-            c for c in review_comments 
-            if not (c.get("path") and c.get("line"))
-        ]
-        
-        if general_comments:
-            logger.info(f"Posting {len(general_comments)} general comments separately")
-            try:
-                _post_review_comments_impl(pr_url, general_comments)
-            except Exception as e:
-                logger.warning(f"Failed to post some general comments: {e}")
-        
-        return {
-            **state,
-            "status": "complete"
-        }
+            
+            # If there are comments without line numbers, post them separately
+            general_comments = [
+                c for c in review_comments 
+                if not (c.get("path") and c.get("line"))
+            ]
+            
+            if general_comments:
+                logger.info(f"Posting {len(general_comments)} general comments separately")
+                try:
+                    _post_review_comments_impl(pr_url, general_comments)
+                except Exception as e:
+                    logger.warning(f"Failed to post some general comments: {e}")
+            
+            return {
+                **state,
+                "status": "complete"
+            }
     except Exception as e:
         logger.error(f"Failed to submit review: {e}")
         # Fallback: try to post comments without official review
