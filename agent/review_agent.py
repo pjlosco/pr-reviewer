@@ -632,7 +632,7 @@ def generate_review_node(state: AgentState) -> AgentState:
         
         files_changed = pr_details.get("files", [])
         
-        prompt = f"""Based on the following code analysis, generate structured review comments for the GitHub PR.
+        prompt = f"""Based on the following code analysis, generate structured review output for the GitHub PR.
 
 Analysis:
 {analysis}
@@ -640,32 +640,31 @@ Analysis:
 Files Changed:
 {chr(10).join([f"- {f.get('path', '')} (+{f.get('additions', 0)}/-{f.get('deletions', 0)})" for f in files_changed[:20]])}
 
-Generate review comments in the following JSON format:
+Output MUST be valid JSON (no markdown) in this format:
 {{
-  "summary": "Overall review summary",
   "review_decision": "APPROVE" | "REQUEST_CHANGES" | "COMMENT",
-  "review_body": "Detailed review summary to include in the official review",
-  "comments": [
+  "main_review_comment": "Single, high-value PR comment that includes a concise summary and ALL feedback grouped by severity: CRITICAL, MAJOR, MINOR. Include actionable suggestions for each item. This is the only top-level PR comment.",
+  "critical_comments": [
     {{
       "path": "file/path.py",
       "line": 42,
-      "body": "Comment text here"
+      "body": "CRITICAL issue description WITH suggested fix or code change"
     }}
   ]
 }}
 
-Review decision guidelines:
-- "APPROVE": Code is good quality, meets requirements, no critical issues
-- "REQUEST_CHANGES": Critical issues found that must be fixed (bugs, security, major design flaws)
-- "COMMENT": Minor issues or suggestions, but code is acceptable
+Severity guidance:
+- CRITICAL (must fix before merging): security issues, correctness bugs, data loss, missing required acceptance criteria
+- MAJOR (performance degradation or regression risk): significant performance or stability concerns
+- MINOR (safe for production): code quality, maintainability, small potential issues
 
-For each comment:
-- Use the file path from the files changed list
-- Specify line number if the comment is about a specific line (use null for general file comments)
-- Make comments constructive and actionable
-- Focus on the most important issues first
+Important rules:
+- Only include CRITICAL items in critical_comments. Each must have path, line, and a suggested fix.
+- All MAJOR and MINOR feedback must live inside main_review_comment (not file comments).
+- main_review_comment must summarize the review and clearly list CRITICAL/MAJOR/MINOR items with actionable suggestions.
+- Keep the output as compact, direct, and high-signal as possible.
 
-Return ONLY valid JSON, no markdown formatting."""
+Return ONLY valid JSON, no markdown code fences."""
 
         logger.info("Generating review comments...")
         response = llm.invoke([HumanMessage(content=prompt)])
@@ -684,18 +683,19 @@ Return ONLY valid JSON, no markdown formatting."""
         
         try:
             review_data = json.loads(response_text)
-            comments = review_data.get("comments", [])
+            critical_comments = review_data.get("critical_comments", [])
             review_decision = review_data.get("review_decision", "COMMENT")
-            review_body = review_data.get("review_body", review_data.get("summary", ""))
+            review_body = review_data.get("main_review_comment", review_data.get("summary", ""))
             
-            # Format comments for GitHub API
+            # Only CRITICAL items become file comments; others stay in main review comment
             formatted_comments = []
-            for comment in comments:
-                formatted_comments.append({
-                    "path": comment.get("path"),
-                    "line": comment.get("line"),
-                    "body": comment.get("body", "")
-                })
+            for comment in critical_comments:
+                if comment.get("path") and comment.get("line"):
+                    formatted_comments.append({
+                        "path": comment.get("path"),
+                        "line": comment.get("line"),
+                        "body": comment.get("body", "")
+                    })
             
             return {
                 **state,
@@ -709,9 +709,9 @@ Return ONLY valid JSON, no markdown formatting."""
             # Fallback: create a single summary comment
             return {
                 **state,
-                "review_comments": [{
-                    "body": f"Code Review Summary:\n\n{analysis}"
-                }],
+                "review_comments": [],
+                "review_decision": "COMMENT",
+                "review_body": f"Code Review Summary:\n\n{analysis}",
                 "status": "review_generated"
             }
     except Exception as e:
