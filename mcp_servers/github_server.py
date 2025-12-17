@@ -399,6 +399,64 @@ def post_review_comment(pr_url: str, comment: str, path: Optional[str] = None,
     return _post_review_comment_impl(pr_url, comment, path, line)
 
 
+def _delete_previous_comments_impl(pr_url: str, marker: str = "<!-- AUTO_REVIEW -->") -> dict:
+    """
+    Delete prior bot comments for a PR that contain a marker.
+    
+    This is useful when re-running automated reviews so stale comments are
+    removed before posting new ones. Only comments authored by the current
+    authenticated user are deleted to avoid touching human feedback.
+    """
+    repo_path, pr_number = parse_pr_url(pr_url)
+    client = get_github_client()
+    
+    try:
+        current_user_login = client.get_user().login
+    except Exception:
+        current_user_login = None
+    
+    repo = client.get_repo(repo_path)
+    pr = repo.get_pull(pr_number)
+    
+    deleted_issue = 0
+    deleted_review = 0
+    
+    def should_delete(comment_body: str, author_login: Optional[str]) -> bool:
+        if marker not in (comment_body or ""):
+            return False
+        if current_user_login and author_login:
+            return author_login == current_user_login
+        # If we can't determine the current user, be conservative and do not delete
+        return False
+    
+    for comment in pr.get_issue_comments():
+        try:
+            if should_delete(comment.body, getattr(comment.user, "login", None)):
+                comment.delete()
+                deleted_issue += 1
+        except Exception as e:
+            logger.warning(f"Failed to delete issue comment {getattr(comment, 'id', 'unknown')}: {e}")
+    
+    for comment in pr.get_review_comments():
+        try:
+            if should_delete(comment.body, getattr(comment.user, "login", None)):
+                comment.delete()
+                deleted_review += 1
+        except Exception as e:
+            logger.warning(f"Failed to delete review comment {getattr(comment, 'id', 'unknown')}: {e}")
+    
+    return {
+        "deleted_issue_comments": deleted_issue,
+        "deleted_review_comments": deleted_review
+    }
+
+
+@mcp.tool()
+def delete_previous_comments(pr_url: str, marker: str = "<!-- AUTO_REVIEW -->") -> dict:
+    """MCP tool wrapper for deleting previous bot comments with a marker."""
+    return _delete_previous_comments_impl(pr_url, marker)
+
+
 def _submit_review_impl(pr_url: str, event: str, body: str = "", comments: Optional[list[dict]] = None) -> dict:
     """
     Submit a review for a pull request with approval, request changes, or comment.
@@ -619,6 +677,8 @@ __all__ = [
     "_submit_review_impl",  # Implementation (for testing)
     "post_review_comments",  # MCP tool (wrapped)
     "_post_review_comments_impl",  # Implementation (for testing)
+    "delete_previous_comments",  # MCP tool (wrapped)
+    "_delete_previous_comments_impl",  # Implementation (for testing)
     "create_github_mcp_server",
     "mcp",
 ]

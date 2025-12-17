@@ -407,9 +407,10 @@ class TestGenerateReviewNode:
 class TestPostReviewNode:
     """Tests for post_review_node()"""
     
+    @patch("agent.review_agent._delete_previous_comments_impl")
     @patch("agent.review_agent._post_review_comments_impl")
     @patch("agent.review_agent.os.getenv")
-    def test_post_review_posts_comments_in_github_actions(self, mock_getenv, mock_post_comments, sample_pr_url):
+    def test_post_review_posts_comments_in_github_actions(self, mock_getenv, mock_post_comments, mock_delete_comments, sample_pr_url):
         """
         Test that post_review_node posts comments as comment in GitHub Actions.
         
@@ -439,10 +440,12 @@ class TestPostReviewNode:
         assert result["status"] == "complete"
         # Should be called twice: once for summary, once for comments
         assert mock_post_comments.call_count == 2
+        mock_delete_comments.assert_called_once()
     
+    @patch("agent.review_agent._delete_previous_comments_impl")
     @patch("agent.review_agent._post_review_comments_impl")
     @patch("agent.review_agent.os.getenv")
-    def test_post_review_handles_request_changes_in_github_actions(self, mock_getenv, mock_post_comments, sample_pr_url):
+    def test_post_review_handles_request_changes_in_github_actions(self, mock_getenv, mock_post_comments, mock_delete_comments, sample_pr_url):
         """Test that REQUEST_CHANGES decision is posted correctly in GitHub Actions."""
         mock_getenv.return_value = "true"
         mock_post_comments.return_value = {"posted": 1, "failed": 0}
@@ -457,11 +460,13 @@ class TestPostReviewNode:
         
         result = post_review_node(state)
         assert result["status"] == "complete"
+        mock_delete_comments.assert_called_once()
     
     @patch("agent.review_agent._submit_review_impl")
+    @patch("agent.review_agent._delete_previous_comments_impl")
     @patch("agent.review_agent._post_review_comments_impl")
     @patch("agent.review_agent.os.getenv")
-    def test_post_review_submits_official_review_when_not_github_actions(self, mock_getenv, mock_post_comments, mock_submit_review, sample_pr_url):
+    def test_post_review_submits_official_review_when_not_github_actions(self, mock_getenv, mock_post_comments, mock_delete_comments, mock_submit_review, sample_pr_url):
         """
         Test that post_review_node submits official review when not in GitHub Actions.
         
@@ -493,9 +498,11 @@ class TestPostReviewNode:
         mock_submit_review.assert_called_once()
         # Should post general comments separately
         mock_post_comments.assert_called_once()
+        mock_delete_comments.assert_called_once()
     
+    @patch("agent.review_agent._delete_previous_comments_impl")
     @patch("agent.review_agent._post_review_comments_impl")
-    def test_post_review_posts_comments(self, mock_post_comments, sample_pr_url):
+    def test_post_review_posts_comments(self, mock_post_comments, mock_delete_comments, sample_pr_url):
         """
         Test that post_review_node posts comments to GitHub.
         
@@ -519,10 +526,17 @@ class TestPostReviewNode:
         result = post_review_node(state)
         
         assert result["status"] == "complete"
-        mock_post_comments.assert_called_once_with(sample_pr_url, review_comments)
+        mock_post_comments.assert_called_once()
+        # Ensure the comment targets the same file/line and includes original text
+        posted = mock_post_comments.call_args[0][1]
+        assert posted[0]["path"] == "test.py"
+        assert posted[0]["line"] == 10
+        assert "Fix this" in posted[0]["body"]
+        mock_delete_comments.assert_called_once()
     
+    @patch("agent.review_agent._delete_previous_comments_impl")
     @patch("agent.review_agent._post_review_comments_impl")
-    def test_post_review_handles_invalid_decision(self, mock_post_comments, sample_pr_url):
+    def test_post_review_handles_invalid_decision(self, mock_post_comments, mock_delete_comments, sample_pr_url):
         """Test that invalid review decision defaults to COMMENT."""
         mock_post_comments.return_value = {"posted": 1, "failed": 0}
         
@@ -535,6 +549,7 @@ class TestPostReviewNode:
         
         result = post_review_node(state)
         assert result["status"] == "complete"
+        mock_delete_comments.assert_called_once()
 
 
 class TestRoutingFunctions:

@@ -24,6 +24,7 @@ from mcp_servers.github_server import (
     _get_pr_details_impl,
     _post_review_comments_impl,
     _submit_review_impl,
+    _delete_previous_comments_impl,
 )
 from mcp_servers.jira_server import (
     _get_acceptance_criteria_impl,
@@ -36,6 +37,10 @@ from mcp_servers.confluence_server import (
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Marker and signature used to identify and clean up bot comments between runs
+AUTO_REVIEW_MARKER = "<!-- AUTO_REVIEW -->"
+AGENT_SIGNATURE = "**LangChain PR Review Agent**"
 
 
 # ============================================================================
@@ -156,6 +161,68 @@ def extract_jira_ticket_id(pr_description: str, labels: list[str]) -> Optional[s
             return matches[0]
     
     return None
+
+
+def annotate_patch_with_line_numbers(patch: str, max_lines: int = 200) -> str:
+    """
+    Add head file line numbers to unified diff lines for LLM consumption.
+    
+    GitHub expects head-side line numbers when posting review comments with
+    the ``line`` parameter. Annotating patches keeps the LLM aligned with
+    the exact line numbers that GitHub will use, reducing misplaced comments.
+    """
+    if not patch:
+        return ""
+    
+    annotated: list[str] = []
+    new_line_no: Optional[int] = None
+    old_line_no: Optional[int] = None
+    
+    for raw_line in patch.splitlines():
+        if len(annotated) >= max_lines:
+            annotated.append("... diff truncated ...")
+            break
+        
+        if raw_line.startswith("@@"):
+            match = re.match(r"@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@", raw_line)
+            if match:
+                old_line_no = int(match.group(1))
+                new_line_no = int(match.group(2))
+            annotated.append(raw_line)
+            continue
+        
+        if new_line_no is None:
+            annotated.append(raw_line)
+            continue
+        
+        if raw_line.startswith("+"):
+            annotated.append(f"{new_line_no:>5} | + {raw_line[1:]}")
+            new_line_no += 1
+        elif raw_line.startswith("-"):
+            annotated.append(f"      | - {raw_line[1:]}")
+            if old_line_no is not None:
+                old_line_no += 1
+        else:
+            annotated.append(f"{new_line_no:>5} |   {raw_line[1:] if raw_line.startswith(' ') else raw_line}")
+            new_line_no += 1
+    
+    return "\n".join(annotated)
+
+
+def tag_comment_body(body: str) -> str:
+    """
+    Add a marker and signature to identify bot comments for later cleanup.
+    
+    Marker lets us delete previous automated comments on reruns; signature
+    clarifies authorship when GitHub shows the token user (e.g., github-actions).
+    """
+    body = body or ""
+    if AUTO_REVIEW_MARKER in body:
+        return body
+    base = f"{AUTO_REVIEW_MARKER}\n{AGENT_SIGNATURE}"
+    if body.strip():
+        return f"{base}\n\n{body}"
+    return base
 
 
 def extract_confluence_page_id(pr_description: str, jira_context: Optional[dict]) -> Optional[str]:
@@ -631,6 +698,15 @@ def generate_review_node(state: AgentState) -> AgentState:
         llm = get_llm_client()
         
         files_changed = pr_details.get("files", [])
+        annotated_diffs = []
+        # Keep token usage bounded while giving the LLM concrete line numbers
+        for file_info in files_changed[:5]:
+            patch = file_info.get("patch") or ""
+            if not patch:
+                continue
+            annotated_patch = annotate_patch_with_line_numbers(patch, max_lines=180)
+            annotated_diffs.append(f"File: {file_info.get('path', '')}\n{annotated_patch}")
+        annotated_diff_text = "\n\n".join(annotated_diffs)
         
         prompt = f"""Based on the following code analysis, generate structured review output for the GitHub PR.
 
@@ -639,6 +715,9 @@ Analysis:
 
 Files Changed:
 {chr(10).join([f"- {f.get('path', '')} (+{f.get('additions', 0)}/-{f.get('deletions', 0)})" for f in files_changed[:20]])}
+
+Diff (HEAD line numbers annotated on new/context lines — use these exact line numbers for inline comments):
+{annotated_diff_text or "No patch data available."}
 
 Output MUST be valid JSON (no markdown) in this format:
 {{
@@ -696,8 +775,10 @@ Return ONLY valid JSON, no markdown code fences."""
                     formatted_comments.append({
                         "path": comment.get("path"),
                         "line": comment.get("line"),
-                        "body": comment.get("body", "")
+                        "body": tag_comment_body(comment.get("body", ""))
                     })
+            
+            review_body = tag_comment_body(review_body)
             
             return {
                 **state,
@@ -709,11 +790,12 @@ Return ONLY valid JSON, no markdown code fences."""
         except json.JSONDecodeError as e:
             logger.warning(f"Failed to parse JSON response, creating single summary comment: {e}")
             # Fallback: create a single summary comment
+            fallback_body = tag_comment_body(f"Code Review Summary:\n\n{analysis}")
             return {
                 **state,
                 "review_comments": [],
                 "review_decision": "COMMENT",
-                "review_body": f"Code Review Summary:\n\n{analysis}",
+                "review_body": fallback_body,
                 "status": "review_generated"
             }
     except Exception as e:
@@ -740,10 +822,43 @@ def post_review_node(state: AgentState) -> AgentState:
     """
     pr_url = state.get("pr_url", "")
     review_comments = state.get("review_comments", [])
-    review_decision = state.get("review_decision", "COMMENT")
+    # Preserve raw value to detect "no decision provided" (tests expect simple comment posting)
+    review_decision_raw = state.get("review_decision")
+    review_decision = review_decision_raw or "COMMENT"
     review_body = state.get("review_body", "")
     
+    # Ensure all bodies carry marker/signature for cleanup & attribution
+    def _with_marker(comment: dict) -> dict:
+        if not comment:
+            return comment
+        body = comment.get("body")
+        if body is None:
+            return comment
+        if AUTO_REVIEW_MARKER in body:
+            return comment
+        return {**comment, "body": tag_comment_body(body)}
+    
+    review_comments = [_with_marker(c) for c in review_comments]
+    if review_body:
+        review_body = tag_comment_body(review_body)
+    
     try:
+        # Clean up prior bot comments on the PR before posting new ones
+        try:
+            _delete_previous_comments_impl(pr_url, AUTO_REVIEW_MARKER)
+        except Exception as cleanup_error:
+            logger.warning(f"Failed to delete previous bot comments: {cleanup_error}")
+        
+        # If no explicit decision was provided, just post the comments without submitting an official review.
+        if review_decision_raw is None:
+            if review_comments:
+                logger.info(f"No review decision provided; posting {len(review_comments)} comment(s) only.")
+                _post_review_comments_impl(pr_url, review_comments)
+            return {
+                **state,
+                "status": "complete"
+            }
+        
         # Check if we're in GitHub Actions
         is_github_actions = os.getenv("GITHUB_ACTIONS") == "true"
         
@@ -796,6 +911,7 @@ def post_review_node(state: AgentState) -> AgentState:
 
 ---
 *Note: GitHub Actions cannot submit official reviews, so this is posted as a comment.*"""
+            summary_comment_body = tag_comment_body(summary_comment_body)
             
             # Post the summary comment first
             summary_comment = [{"body": summary_comment_body}]
@@ -861,7 +977,8 @@ def post_review_node(state: AgentState) -> AgentState:
             try:
                 logger.info("Falling back to posting comments without official review")
                 # Post summary first to ensure context; then post critical comments
-                summary_only = [{"body": review_body or "Code review summary"}] if review_body else []
+                summary_only_body = review_body or "Code review summary"
+                summary_only = [{"body": tag_comment_body(summary_only_body)}] if summary_only_body else []
                 if summary_only:
                     _post_review_comments_impl(pr_url, summary_only)
                 if review_comments:
