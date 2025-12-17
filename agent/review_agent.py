@@ -527,7 +527,8 @@ def analyze_code_node(state: AgentState) -> AgentState:
         confluence_context = state.get("confluence_context")
         
         prompt_parts = [
-            "You are an expert code reviewer. Analyze the following pull request changes.",
+            "You are an expert code reviewer focused on design, scalability, security, reliability, and efficiency. Provide high-signal findings only.",
+            "Ignore comment-only or docstring-only changes unless they introduce security or logic defects.",
             "",
             f"PR Title: {pr_details.get('title', 'N/A')}",
             f"PR Description: {pr_description}",
@@ -559,12 +560,11 @@ def analyze_code_node(state: AgentState) -> AgentState:
             "",
             "Focus on human-reviewer concerns:",
             "- Logic errors and edge cases",
-            "- Design pattern violations",
+            "- Design, architecture, and scalability",
             "- Code maintainability",
-            "- Security vulnerabilities",
-            "- Performance issues",
-            "- Missing error handling",
-            "- Architecture concerns",
+            "- Security vulnerabilities and data handling",
+            "- Performance issues and regressions",
+            "- Reliability and error handling",
             "",
             "Do NOT focus on:",
             "- Syntax errors (caught by linters)",
@@ -663,6 +663,8 @@ Important rules:
 - All MAJOR and MINOR feedback must live inside main_review_comment (not file comments).
 - main_review_comment must summarize the review and clearly list CRITICAL/MAJOR/MINOR items with actionable suggestions.
 - Keep the output as compact, direct, and high-signal as possible.
+- Ignore comment-only or docstring-only changes unless they introduce security or logic defects.
+- For any CRITICAL comment, ensure the line number maps to the exact changed line in the diff (GitHub displays review comments under the referenced line).
 
 Return ONLY valid JSON, no markdown code fences."""
 
@@ -858,7 +860,12 @@ def post_review_node(state: AgentState) -> AgentState:
         if review_comments:
             try:
                 logger.info("Falling back to posting comments without official review")
-                _post_review_comments_impl(pr_url, review_comments)
+                # Post summary first to ensure context; then post critical comments
+                summary_only = [{"body": review_body or "Code review summary"}] if review_body else []
+                if summary_only:
+                    _post_review_comments_impl(pr_url, summary_only)
+                if review_comments:
+                    _post_review_comments_impl(pr_url, review_comments)
                 # Don't fail if we can at least post comments
                 return {
                     **state,
