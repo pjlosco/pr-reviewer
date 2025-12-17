@@ -745,6 +745,27 @@ def post_review_node(state: AgentState) -> AgentState:
         # Check if we're in GitHub Actions
         is_github_actions = os.getenv("GITHUB_ACTIONS") == "true"
         
+        # Enforce stricter decision: any CRITICAL or MAJOR feedback => REQUEST_CHANGES
+        has_critical_comments = bool(review_comments)
+        has_major_or_critical_text = any(
+            keyword in review_body.upper() for keyword in ["CRITICAL", "MAJOR"]
+        )
+        if has_critical_comments or has_major_or_critical_text:
+            if review_decision == "APPROVE":
+                review_decision = "REQUEST_CHANGES"
+                review_body = (
+                    review_body + "\n\nAuto-adjusted: Critical/Major issues found, requesting changes."
+                    if review_body
+                    else "Critical/Major issues found, requesting changes."
+                )
+            elif review_decision == "COMMENT":
+                review_decision = "REQUEST_CHANGES"
+                review_body = (
+                    review_body + "\n\nAuto-adjusted: Critical/Major issues found, requesting changes."
+                    if review_body
+                    else "Critical/Major issues found, requesting changes."
+                )
+        
         # Validate review decision
         if review_decision not in ["APPROVE", "REQUEST_CHANGES", "COMMENT"]:
             logger.warning(f"Invalid review decision '{review_decision}', defaulting to COMMENT")
